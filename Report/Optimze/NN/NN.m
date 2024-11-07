@@ -90,7 +90,7 @@ mse = mean((YPred - Y_test).^2, 'all');
 fprintf('Mean Squared Error: %.4f\n', mse);
 
 % Predict robot configuration for a new input (example)
-new_angles = [pi/4, pi/6, pi/3, pi/2, pi/4, pi/3];
+new_angles = [pi/2, pi/4, pi/3, pi/6, pi/8, pi/10];
 predicted_angles = predict(net, new_angles);
 disp('Predicted joint angles:');
 disp(predicted_angles);
