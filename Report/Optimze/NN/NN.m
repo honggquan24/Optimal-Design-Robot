@@ -1,96 +1,91 @@
-% Setup D-H parameters as per the article
+% Clear previous variables and command window
 clear;
 clc;
 
-% Define the D-H parameters for each joint
-th(1) = 0; d(1) = 0; a(1) = 0; alp(1) = 0;
-th(2) = 0; d(2) = 0; a(2) = 500; alp(2) = -pi/2;
-th(3) = 0; d(3) = 0; a(3) = 1700; alp(3) = 0;
-th(4) = 0; d(4) = 2850; a(4) = 180; alp(4) = -pi/2;
-th(5) = 0; d(5) = 0; a(5) = 0; alp(5) = pi/2;
-th(6) = 0; d(6) = 0; a(6) = 0; alp(6) = -pi/2;
+%% Robot Definition using D-H Parameters
 
-% Define links using the specified D-H parameters in modified form
-L1 = Link([th(1), d(1), a(1), alp(1)], 'modified');
-L2 = Link([th(2), d(2), a(2), alp(2)], 'modified');
-L3 = Link([th(3), d(3), a(3), alp(3)], 'modified');
-L4 = Link([th(4), d(4), a(4), alp(4)], 'modified');
-L5 = Link([th(5), d(5), a(5), alp(5)], 'modified');
-L6 = Link([th(6), d(6), a(6), alp(6)], 'modified');
+% Define the D-H parameters for each joint (modified D-H parameters)
+th = [0, 0, 0, 0, 0, 0];        % Joint angles (theta)
+d = [0, 0, 0, 2850, 0, 0];      % Offsets along previous z to the common normal
+a = [0, 500, 1700, 180, 0, 0];  % Lengths of the common normal (a.k.a a, distance from Zi-1 to Zi along Xi)
+alp = [0, -pi/2, 0, -pi/2, pi/2, -pi/2];  % Angles about common normal from Zi-1 to Zi
 
-% Create robot model
-robot = SerialLink([L1, L2, L3, L4, L5, L6]);
-robot.name = '6-dof-robot';
+% Define the robot links using the specified D-H parameters
+L(1) = Link([th(1), d(1), a(1), alp(1)], 'modified');
+L(2) = Link([th(2), d(2), a(2), alp(2)], 'modified');
+L(3) = Link([th(3), d(3), a(3), alp(3)], 'modified');
+L(4) = Link([th(4), d(4), a(4), alp(4)], 'modified');
+L(5) = Link([th(5), d(5), a(5), alp(5)], 'modified');
+L(6) = Link([th(6), d(6), a(6), alp(6)], 'modified');
 
-% Parameters for quintuple polynomial interpolation
-t0 = 0; tf = 10; % Start and end times
-q0 = [0, 0, 0, 0, 0, 0]; % Initial joint angles
-qf = [pi/2, pi/4, pi/3, pi/6, pi/8, pi/10]; % Final joint angles
+% Create the serial link robot model
+robot = SerialLink(L, 'name', '6-DOF Robot');
 
-% Quintuple polynomial coefficients calculation
-a0 = q0;
-a1 = zeros(1, 6);
-a2 = zeros(1, 6);
-a3 = (10 * (qf - q0)) / (tf^3);
-a4 = (-15 * (qf - q0)) / (tf^4);
-a5 = (6 * (qf - q0)) / (tf^5);
+%% Compute Inverse Kinematics for an Arbitrary End-Effector Pose
 
-% Generate trajectory over time
-dt = 0.1; % Time step
-time = t0:dt:tf;
-trajectory = zeros(length(time), 6); % To store joint angles over time
+% Define the desired end-effector pose (position and orientation)
+% Position (x, y, z) in millimeters (ensure it's a 1x3 row vector)
+desired_position = [1000, 500, 1500];
 
-for i = 1:length(time)
-    t = time(i);
-    trajectory(i, :) = a0 + a1 * t + a2 * t^2 + a3 * t^3 + a4 * t^4 + a5 * t^5;
-end
+% Orientation in terms of Roll-Pitch-Yaw angles (in radians)
+% For example, let's set some arbitrary orientation
+desired_rpy = [deg2rad(30), deg2rad(45), deg2rad(60)];  % [roll; pitch; yaw]
 
-% Plot the robot trajectory
-for i = 1:size(trajectory, 1)
-    robot.plot(trajectory(i, :));
-    pause(0.05);
-end
+% Convert Roll-Pitch-Yaw to Homogeneous Transformation Matrix
+% Use eul2tr which returns a 4x4 transformation matrix
+desired_orientation = eul2tr(desired_rpy(1), desired_rpy(2), desired_rpy(3));
 
-% Save trajectory data for further analysis or training
-save('robot_trajectory_data.mat', 'time', 'trajectory');
+% Create the homogeneous transformation matrix for the desired pose
+% Multiply the translation and rotation matrices (both are 4x4)
+T_desired = transl(desired_position) * desired_orientation;
 
-% Load data for neural network training
-load('robot_trajectory_data.mat');
+% Display the desired transformation matrix
+disp('Desired End-Effector Pose:');
+disp(T_desired);
 
-% Split data into training and testing sets
-train_ratio = 0.8;
-num_train = round(train_ratio * length(time));
-X_train = trajectory(1:num_train, :);
-Y_train = X_train; % Target is the same in this example
-X_test = trajectory(num_train+1:end, :);
-Y_test = X_test;
+%% Inverse Kinematics Calculation
 
-% Define and train a neural network model to learn the trajectory
-layers = [
-    featureInputLayer(6)
-    fullyConnectedLayer(64)
-    reluLayer
-    fullyConnectedLayer(64)
-    reluLayer
-    fullyConnectedLayer(6) % Predicting joint angles
-    regressionLayer
-];
+% Initial guess for joint angles (can be zeros or previous pose)
+q_initial = zeros(1, 6);
 
-options = trainingOptions('adam', ...
-    'MaxEpochs', 100, ...
-    'MiniBatchSize', 32, ...
-    'Plots', 'training-progress', ...
-    'Verbose', false);
+% Use the inverse kinematics function ikcon for better convergence
+% Note: ikcon uses numerical methods to find a solution close to q_initial
+[q_solution, error] = robot.ikcon(T_desired, q_initial);
 
-net = trainNetwork(X_train, Y_train, layers, options);
+% Display the calculated joint angles (in radians)
+disp('Calculated Joint Angles (radians):');
+disp(q_solution);
 
-% Evaluate model performance
-YPred = predict(net, X_test);
-mse = mean((YPred - Y_test).^2, 'all');
-fprintf('Mean Squared Error: %.4f\n', mse);
+% Convert joint angles to degrees for better understanding
+q_solution_deg = rad2deg(q_solution);
+disp('Calculated Joint Angles (degrees):');
+disp(q_solution_deg);
 
-% Predict robot configuration for a new input (example)
-new_angles = [pi/2, pi/4, pi/3, pi/6, pi/8, pi/10];
-predicted_angles = predict(net, new_angles);
-disp('Predicted joint angles:');
-disp(predicted_angles);
+%% Verify the Solution by Forward Kinematics
+
+% Compute the forward kinematics with the calculated joint angles
+T_computed = robot.fkine(q_solution);
+
+% Display the computed end-effector pose
+disp('Computed End-Effector Pose from Forward Kinematics:');
+disp(T_computed);
+
+% Compare the desired and computed end-effector positions
+desired_pos_extracted = transl(T_desired);
+computed_pos_extracted = transl(T_computed);
+
+position_error = norm(desired_pos_extracted - computed_pos_extracted);
+disp(['Position Error (mm): ', num2str(position_error)]);
+
+%% Visualize the Robot Configuration
+
+% Plot the robot in the calculated joint configuration
+figure;
+robot.plot(q_solution);
+title('Robot Configuration for Desired End-Effector Pose');
+
+% Optionally, plot the desired end-effector position
+hold on;
+plot3(desired_position(1), desired_position(2), desired_position(3), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+legend('Robot Configuration', 'Desired End-Effector Position');
+hold off;
